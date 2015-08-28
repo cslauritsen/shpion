@@ -1,3 +1,6 @@
 shpion
 .*.swp
 .*.swo
+*.o
+shpion
+shpion_sub
