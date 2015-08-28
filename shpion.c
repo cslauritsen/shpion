@@ -147,7 +147,7 @@ int main (int argc, char *argv[]) {
 
 	sigset_t mysigs;
 	struct sigaction act;
-	struct timespec *ts = NULL;
+	struct timespec ts = {5 * 60 , 0}; // report every 5 minutes whether input occurs or not
 
 	memset(&act, 0, sizeof(act));
 	act.sa_handler = handler;
@@ -163,7 +163,6 @@ int main (int argc, char *argv[]) {
 	sigemptyset(&mysigs);
 	sigaddset(&mysigs, SIGINT);
 	sigaddset(&mysigs, SIGTERM);
-	sigaddset(&mysigs, SIGKILL);
 
 	debug = 1;
 	//Setup check
@@ -235,7 +234,7 @@ int main (int argc, char *argv[]) {
 		pfds[1].fd = mfd;
 		pfds[1].events = POLLIN;
 
-		int err = ppoll(pfds, 2, ts, &mysigs);
+		int err = ppoll(pfds, 2, &ts, &mysigs);
 
 		if(EINTR != err) {
 			int i=0;
@@ -256,13 +255,21 @@ int main (int argc, char *argv[]) {
 				event_count += mouse_events_read;
 			}
 
+			if (0 == mouse_events_read && 0 == kb_events_read) {
+				struct timeval tv;
+				gettimeofday(&tv, NULL);
+				long this_interval = tv.tv_sec & INTERVAL_MASK;
+				reportactivity(topicStr, this_interval);
+			}
+
 			for (i=0; i < kb_events_read; i++) {
 				long this_interval = ev[i].time.tv_sec & INTERVAL_MASK;
-				if (debug) printf ("%ld %ld.%ld sz=%d kbd_events_read=%d Code=%d val=%02x typ=%x\n"
+				if (debug) printf ("%ld %ld.%ld sz=%d kbd_events_read=%d\n"
 					, this_interval
 					, ev[i].time.tv_sec
 					, ev[i].time.tv_usec
-					, size, kb_events_read, (ev[i].code), ev[i].value, ev[i].type);
+					, size, kb_events_read
+					);
 				if (this_interval != last_interval) {
 					reportactivity(topicStr, this_interval);
 				}
