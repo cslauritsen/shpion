@@ -29,6 +29,7 @@ static volatile int exit_request = 0;
 
 
 static MQTTClient client;
+MQTTClient_connectOptions conn_opts = MQTTClient_connectOptions_initializer;
 int debug;
 int event_count;
 
@@ -113,24 +114,30 @@ void connlost(void *context, char *cause) {
 }
 
 static void reportactivity(const char* topicStr, long this_interval) {
-    	MQTTClient_deliveryToken token;
-    	MQTTClient_message pubmsg = MQTTClient_message_initializer;
-	char * msgBuf = NULL;
-	asprintf(&msgBuf, "%ld: %d", this_interval, event_count);
-	if (msgBuf) {
-		pubmsg.payload 		= msgBuf;
-		pubmsg.payloadlen 	= strlen(msgBuf);
-		pubmsg.qos 		= QOS;
-		pubmsg.retained 	= 0;
-		MQTTClient_publishMessage(client, (const char*) topicStr, &pubmsg, &token);
-		free(msgBuf);
+	if (!exit_request) {
+		if (MQTTClient_isConnected(client) || (MQTTClient_connect(client, &conn_opts)) != MQTTCLIENT_SUCCESS) {
+    			MQTTClient_deliveryToken token;
+    			MQTTClient_message pubmsg = MQTTClient_message_initializer;
+			char * msgBuf = NULL;
+			asprintf(&msgBuf, "%ld: %d", this_interval, event_count);
+			if (msgBuf) {
+				pubmsg.payload 		= msgBuf;
+				pubmsg.payloadlen 	= strlen(msgBuf);
+				pubmsg.qos 		= QOS;
+				pubmsg.retained 	= 0;
+				MQTTClient_publishMessage(client, (const char*) topicStr, &pubmsg, &token);
+				free(msgBuf);
+			}
+	
+			if (debug) {
+				printf("put msg event count: %d\n", event_count);
+			}
+		}
+		else {
+			printf("WARNING: Connection failed to MQTT\n");
+		}
+		event_count = 0;
 	}
-
-	if (debug) {
-		printf("put msg event count: %d\n", event_count);
-	}
-
-	event_count = 0;
 }
  
 int main (int argc, char *argv[]) {
@@ -177,14 +184,12 @@ int main (int argc, char *argv[]) {
  
  
 	//Open Devices
-	if ((kfd = open ("/dev/input/by-path/platform-i8042-serio-0-event-kbd", O_RDONLY)) == -1)
+	if ((kfd = open ("/dev/input/event2", O_RDONLY)) == -1)
 		puts("Failed to open device1");
-	//if ((mfd = open ("/dev/input/by-path/platform-i8042-serio-1-mouse", O_RDONLY)) == -1)
 	if ((mfd = open ("/dev/input/mouse0", O_RDONLY)) == -1)
 		puts("Failed to open device2");
 
  
-    	MQTTClient_connectOptions conn_opts = MQTTClient_connectOptions_initializer;
     	MQTTClient_deliveryToken token;
     	MQTTClient_message pubmsg = MQTTClient_message_initializer;
 
@@ -198,14 +203,13 @@ int main (int argc, char *argv[]) {
 
 
     	MQTTClient_create(&client, address, (const char*) email, MQTTCLIENT_PERSISTENCE_NONE, NULL);
-    	conn_opts.keepAliveInterval = 20; 
-	conn_opts.cleansession = 1;
-
 	MQTTClient_setCallbacks(client, NULL, connlost, msgarrvd, delivered);
+
+	conn_opts.keepAliveInterval = 20; 
+	conn_opts.cleansession = 1;
 
 	if ((rc = MQTTClient_connect(client, &conn_opts)) != MQTTCLIENT_SUCCESS) {
         	printf("Failed to connect, return code %d\n", rc);
-        	exit(-1);       
 	}
 	else {
 		char  msgBuf[100];
