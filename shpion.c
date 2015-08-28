@@ -1,4 +1,5 @@
 #define _GNU_SOURCE
+#include <sys/poll.h>
 #include <MQTTClient.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -23,8 +24,13 @@
 #define QOS         1
 #define TIMEOUT     10000L
 
+
+static volatile int exit_request = 0;
+
+
 static MQTTClient client;
 int debug;
+int event_count;
 
 static char * gitemail() {
 	FILE *file = NULL;
@@ -61,12 +67,12 @@ static char * sha1_to_str(unsigned char* inbuf, int inlen) {
 	return outbuf;
 }
 
-void handler (int sig)
+static void handler (int sig)
 {
-  MQTTClient_disconnect(client, 10000);
+  MQTTClient_disconnect(client, 2);
   MQTTClient_destroy(&client);
+  exit_request=1;
   printf ("\nexiting...(%d)\n", sig);
-  exit (0);
 }
  
 void perror_exit (char *error)
@@ -105,49 +111,82 @@ void connlost(void *context, char *cause) {
     printf("\nConnection lost\n");
     printf("     cause: %s\n", cause);
 }
+
+static void reportactivity(const char* topicStr, long this_interval) {
+    	MQTTClient_deliveryToken token;
+    	MQTTClient_message pubmsg = MQTTClient_message_initializer;
+	char * msgBuf = NULL;
+	asprintf(&msgBuf, "%ld: %d", this_interval, event_count);
+	if (msgBuf) {
+		pubmsg.payload 		= msgBuf;
+		pubmsg.payloadlen 	= strlen(msgBuf);
+		pubmsg.qos 		= QOS;
+		pubmsg.retained 	= 0;
+		MQTTClient_publishMessage(client, (const char*) topicStr, &pubmsg, &token);
+		free(msgBuf);
+	}
+
+	if (debug) {
+		printf("put msg event count: %d\n", event_count);
+	}
+
+	event_count = 0;
+}
  
 int main (int argc, char *argv[]) {
 	struct input_event ev[64];
-	int fd, rd, size = sizeof (struct input_event);
-	char name[256] = "Unknown";
-	char *device = NULL;
+	int mfd, kfd, bytes_read, size = sizeof (struct input_event);
 	long last_interval = -1;
-	long event_count = 0;
 
-	signal(SIGKILL, handler);
-	signal(SIGTERM, handler);
- 
-	debug = 0;
+	sigset_t mysigs;
+	struct sigaction act;
+	struct timespec *ts = NULL;
+
+	memset(&act, 0, sizeof(act));
+	act.sa_handler = handler;
+	if (sigaction(SIGINT, &act, NULL)) {
+		perror("sigaction");
+		return 1;
+	}
+	if (sigaction(SIGTERM, &act, NULL)) {
+		perror("sigaction");
+		return 1;
+	}
+
+	sigemptyset(&mysigs);
+	sigaddset(&mysigs, SIGINT);
+	sigaddset(&mysigs, SIGTERM);
+	sigaddset(&mysigs, SIGKILL);
+
+	debug = 1;
 	//Setup check
 	//
-	if (argc < 3) {
-		printf("Usage: %s device mqttserver\n", argv[0]);
+	if (argc < 2) {
+		printf("Usage: %s mqttserver\n", argv[0]);
 		exit(2);
 	}
 	if (argv[1] == NULL){
-		printf("Please specify (on the command line) the path to the dev event interface devicen");
+		printf("Please specify the mqttserver\n");
 		exit (0);
 	}
- 
-	const char *address = argv[2];
+
+	const char *address = argv[1];
 
 	if ((getuid ()) != 0)
 		printf ("You are not root! This may not work...n");
  
-	if (argc > 1)
-		device = argv[1];
  
-	//Open Device
-	if ((fd = open (device, O_RDONLY)) == -1)
-		printf ("%s is not a vaild device.n", device);
- 
-	//Print Device Name
-	ioctl (fd, EVIOCGNAME (sizeof (name)), name);
-	printf ("Reading From : %s (%s)n", device, name);
+	//Open Devices
+	if ((kfd = open ("/dev/input/by-path/platform-i8042-serio-0-event-kbd", O_RDONLY)) == -1)
+		puts("Failed to open device1");
+	//if ((mfd = open ("/dev/input/by-path/platform-i8042-serio-1-mouse", O_RDONLY)) == -1)
+	if ((mfd = open ("/dev/input/mouse0", O_RDONLY)) == -1)
+		puts("Failed to open device2");
 
+ 
     	MQTTClient_connectOptions conn_opts = MQTTClient_connectOptions_initializer;
-    	MQTTClient_message pubmsg = MQTTClient_message_initializer;
     	MQTTClient_deliveryToken token;
+    	MQTTClient_message pubmsg = MQTTClient_message_initializer;
 
     	int rc;
 
@@ -182,40 +221,62 @@ int main (int argc, char *argv[]) {
 		MQTTClient_publishMessage(client, (const char*) topicStr, &pubmsg, &token);
 	}
 
-	while (1) {
-		int i=0;
-		if ((rd = read (fd, ev, size * 64)) < size) {
-			perror_exit ("read()");      
-		}
+	struct pollfd pfds[2];
+	unsigned char buf[3*10];
+	while (!exit_request) {
 
-		for (i=0; i < rd/size; i++) {
-			if (0x4 == ev[i].type) {
+		pfds[0].fd = kfd;
+		pfds[0].events = POLLIN;
+
+		pfds[1].fd = mfd;
+		pfds[1].events = POLLIN;
+
+		int err = ppoll(pfds, 2, ts, &mysigs);
+
+		if(EINTR != err) {
+			int i=0;
+			bytes_read = 0;
+			int kb_events_read = 0;
+			int mouse_events_read = 0;
+			// Keyboard events fill in struct input_event
+			if (pfds[0].revents & POLLIN) {
+				bytes_read += read(pfds[0].fd, ev + kb_events_read, size * (64-kb_events_read));
+				kb_events_read += bytes_read / size;
+				event_count += kb_events_read;
+			}
+
+			// mouse events are 3-byte thingies
+			if (pfds[1].revents & POLLIN) {
+				bytes_read += read(pfds[1].fd, buf, sizeof(buf));
+				mouse_events_read += bytes_read / 3;
+				event_count += mouse_events_read;
+			}
+
+			for (i=0; i < kb_events_read; i++) {
 				long this_interval = ev[i].time.tv_sec & INTERVAL_MASK;
-				if (-1 == last_interval || this_interval != last_interval) {
-					if (debug) {
-						printf("\n========================================%ld >> %ld\n"
-							, this_interval, event_count);
-					}
-					char * msgBuf = NULL;
-					asprintf(&msgBuf, "%ld: %ld", this_interval, event_count);
-					if (msgBuf) {
-						pubmsg.payload 		= msgBuf;
-						pubmsg.payloadlen 	= strlen(msgBuf);
-						pubmsg.qos 		= QOS;
-						pubmsg.retained 	= 0;
-						MQTTClient_publishMessage(client, (const char*) topicStr, &pubmsg, &token);
-						free(msgBuf);
-					}
-					
-					event_count = 0;
-				}
-				if (debug) printf ("%ld %ld.%ld sz=%d rd=%d Code=%d val=%02x typ=%x\n"
+				if (debug) printf ("%ld %ld.%ld sz=%d kbd_events_read=%d Code=%d val=%02x typ=%x\n"
 					, this_interval
 					, ev[i].time.tv_sec
 					, ev[i].time.tv_usec
-					, size, rd, (ev[i].code), ev[i].value, ev[i].type);
+					, size, kb_events_read, (ev[i].code), ev[i].value, ev[i].type);
+				if (this_interval != last_interval) {
+					reportactivity(topicStr, this_interval);
+				}
 				last_interval = this_interval;
-				event_count++;
+			}
+			for (i=0; i < mouse_events_read; i++) {
+				struct timeval tv;
+				gettimeofday(&tv, NULL);
+				long this_interval = tv.tv_sec & INTERVAL_MASK;
+				if (debug) printf ("%ld %ld.%ld mouse_events_read=%d\n"
+					, this_interval
+					, tv.tv_sec
+					, tv.tv_usec
+					, mouse_events_read);
+				if (this_interval != last_interval) {
+					reportactivity(topicStr, this_interval);
+				}
+				last_interval = this_interval;
 			}
 		}
 	}
@@ -235,5 +296,8 @@ int main (int argc, char *argv[]) {
 		topicStr = NULL;
 	}
  
+	puts("Finished.");
 	return 0;
 }
+
+
