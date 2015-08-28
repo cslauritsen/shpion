@@ -173,11 +173,13 @@ int main (int argc, char *argv[]) {
 		time_t now;
 		time(&now);
 		ctime_r(&now, msgBuf);
-		pubmsg.payload = msgBuf;
-		pubmsg.payloadlen = strlen(msgBuf);
+		char * msg2 = NULL;
+		asprintf(&msg2, "Started at %s", msgBuf);
+		pubmsg.payload = msg2;
+		pubmsg.payloadlen = strlen(msg2);
 		pubmsg.qos = QOS;
 		pubmsg.retained = 0;
-		MQTTClient_publishMessage(client, "shpion/started", &pubmsg, &token);
+		MQTTClient_publishMessage(client, (const char*) topicStr, &pubmsg, &token);
 	}
 
 	while (1) {
