@@ -1,4 +1,5 @@
 #define _GNU_SOURCE
+#include <ctype.h>
 #include <sys/poll.h>
 #include <MQTTClient.h>
 #include <stdio.h>
@@ -19,8 +20,8 @@
 #include <signal.h>
 #include <openssl/sha.h>
  
-#define REPORTING_INTERVAL_SECONDS 	128L
-#define REPORTING_INTERVAL_MASK		~(REPORTING_INTERVAL_SECONDS)		
+#define REPORTING_INTERVAL_MASK		((unsigned long) 0xffffffffffffff80L)
+#define REPORTING_INTERVAL_SECONDS 	(1 + ~(REPORTING_INTERVAL_MASK))
 #define EVBUFSZ				64
 
 #define QOS         1
@@ -41,8 +42,8 @@ static char * gitemail() {
 	file = fopen("/u01/pnp/.gitconfig", "r");
 	while(fgets(buf, sizeof(buf), file)) {
 		char* newlinepos = index(buf, '\n');
-		if (newlinepos) {
-			*newlinepos = '\0';
+		while(newlinepos && isspace(*newlinepos)) {
+			*newlinepos-- = '\0';
 		}
 		char *c = strstr(buf, "email = ");
 		if (c) {
@@ -78,12 +79,6 @@ static void handler (int sig)
   printf ("\nexiting...(%d)\n", sig);
 }
  
-void perror_exit (char *error)
-{
-  perror (error);
-  handler (9);
-}
- 
 volatile MQTTClient_deliveryToken deliveredtoken;
 
 void delivered(void *context, MQTTClient_deliveryToken dt) {
@@ -117,11 +112,11 @@ void connlost(void *context, char *cause) {
 
 static void reportactivity(const char* topicStr, long this_interval) {
 	if (!exit_request) {
-		if (MQTTClient_isConnected(client) || (MQTTClient_connect(client, &conn_opts)) != MQTTCLIENT_SUCCESS) {
+		if (MQTTClient_isConnected(client) || (MQTTClient_connect(client, &conn_opts)) == MQTTCLIENT_SUCCESS) {
     			MQTTClient_deliveryToken token;
     			MQTTClient_message pubmsg = MQTTClient_message_initializer;
 			char * msgBuf = NULL;
-			asprintf(&msgBuf, "%ld: %d", this_interval, event_count);
+			asprintf(&msgBuf, "%ld,%d", this_interval, event_count);
 			if (msgBuf) {
 				pubmsg.payload 		= msgBuf;
 				pubmsg.payloadlen 	= strlen(msgBuf);
@@ -134,11 +129,11 @@ static void reportactivity(const char* topicStr, long this_interval) {
 			if (debug) {
 				printf("put msg event count: %d\n", event_count);
 			}
+			event_count = 0;
 		}
 		else {
 			printf("WARNING: Connection failed to MQTT\n");
 		}
-		event_count = 0;
 	}
 }
  
@@ -167,8 +162,6 @@ int main (int argc, char *argv[]) {
 	sigaddset(&mysigs, SIGTERM);
 
 	debug = 1;
-	//Setup check
-	//
 	if (argc < 2) {
 		printf("Usage: %s mqttserver\n", argv[0]);
 		exit(2);
@@ -185,15 +178,16 @@ int main (int argc, char *argv[]) {
  
  
 	//Open Devices
-	if ((kfd = open ("/dev/input/event2", O_RDONLY)) == -1)
-		puts("Failed to open device1");
-	if ((mfd = open ("/dev/input/mouse0", O_RDONLY)) == -1)
-		puts("Failed to open device2");
+	if ((kfd = open ("/dev/input/event2", O_RDONLY)) == -1) {
+		perror("Failed to open device1");
+		exit(2);
+	}
+	if ((mfd = open ("/dev/input/mouse0", O_RDONLY)) == -1) {
+		perror("Failed to open device2");
+		exit(2);
+	}
 
  
-    	MQTTClient_deliveryToken token;
-    	MQTTClient_message pubmsg = MQTTClient_message_initializer;
-
     	int rc;
 
 	char *email = gitemail();
@@ -213,17 +207,11 @@ int main (int argc, char *argv[]) {
         	printf("Failed to connect, return code %d\n", rc);
 	}
 	else {
-		char  msgBuf[100];
-		time_t now;
-		time(&now);
-		ctime_r(&now, msgBuf);
-		char * msg2 = NULL;
-		asprintf(&msg2, "Started at %s", msgBuf);
-		pubmsg.payload = msg2;
-		pubmsg.payloadlen = strlen(msg2);
-		pubmsg.qos = QOS;
-		pubmsg.retained = 0;
-		MQTTClient_publishMessage(client, (const char*) topicStr, &pubmsg, &token);
+		struct timeval tv;
+		gettimeofday(&tv, NULL);
+		long this_interval = tv.tv_sec & REPORTING_INTERVAL_MASK;
+		event_count = -1;
+		reportactivity(topicStr, this_interval);
 	}
 
 	struct pollfd pfds[2];

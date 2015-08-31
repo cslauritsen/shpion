@@ -122,8 +122,6 @@ int main(int argc, char** argv)
 
   if (strchr(topic, '#') || strchr(topic, '+'))
 		opts.showtopics = 1;
-  if (opts.showtopics)
-		printf("topic is %s\n", topic);
 
 	getopts(argc, argv);	
 	sprintf(url, "%s:%s", opts.host, opts.port);
@@ -153,9 +151,9 @@ int main(int argc, char** argv)
 		if (message)
 		{
 			if (opts.showtopics)
-				printf("%s\t", topicName);
+				printf("%s,", topicName);
       if (opts.nodelimiter)
-				printf("%.*s", message->payloadlen, (char*)message->payload);
+				printf("%.*s,", message->payloadlen, (char*)message->payload);
 			else
 				printf("%.*s%s", message->payloadlen, (char*)message->payload, opts.delimiter);
 			fflush(stdout);
@@ -167,9 +165,7 @@ int main(int argc, char** argv)
 	}
 	
 	printf("Stopping\n");
-
 	MQTTClient_disconnect(client, 0);
-
  	MQTTClient_destroy(&client);
 
 	return 0;
