@@ -6,3 +6,6 @@ shpion: shpion.c
 shpion_sub: shpion_sub.c
 	 gcc -Wall -o shpion_sub shpion_sub.c -lpaho-mqtt3c 
 
+
+clean:
+	-rm -f shpion shpion_sub *.o
