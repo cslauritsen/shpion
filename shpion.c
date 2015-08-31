@@ -19,7 +19,9 @@
 #include <signal.h>
 #include <openssl/sha.h>
  
-#define INTERVAL_MASK	0xffffffffffffffc0L
+#define REPORTING_INTERVAL_SECONDS 	128L
+#define REPORTING_INTERVAL_MASK		~(REPORTING_INTERVAL_SECONDS)		
+#define EVBUFSZ				64
 
 #define QOS         1
 #define TIMEOUT     10000L
@@ -141,13 +143,13 @@ static void reportactivity(const char* topicStr, long this_interval) {
 }
  
 int main (int argc, char *argv[]) {
-	struct input_event ev[64];
+	struct input_event ev[EVBUFSZ];
 	int mfd, kfd, bytes_read, size = sizeof (struct input_event);
 	long last_interval = -1;
 
 	sigset_t mysigs;
 	struct sigaction act;
-	struct timespec ts = {5 * 60 , 0}; // report every 5 minutes whether input occurs or not
+	struct timespec ts = {REPORTING_INTERVAL_SECONDS , 0}; // report every x seconds (where x matches the reporting mask)
 
 	memset(&act, 0, sizeof(act));
 	act.sa_handler = handler;
@@ -243,7 +245,7 @@ int main (int argc, char *argv[]) {
 			int mouse_events_read = 0;
 			// Keyboard events fill in struct input_event
 			if (pfds[0].revents & POLLIN) {
-				bytes_read += read(pfds[0].fd, ev + kb_events_read, size * (64-kb_events_read));
+				bytes_read += read(pfds[0].fd, ev + kb_events_read, size * (EVBUFSZ-kb_events_read));
 				kb_events_read += bytes_read / size;
 				event_count += kb_events_read;
 			}
@@ -258,12 +260,12 @@ int main (int argc, char *argv[]) {
 			if (0 == mouse_events_read && 0 == kb_events_read) {
 				struct timeval tv;
 				gettimeofday(&tv, NULL);
-				long this_interval = tv.tv_sec & INTERVAL_MASK;
+				long this_interval = tv.tv_sec & REPORTING_INTERVAL_MASK;
 				reportactivity(topicStr, this_interval);
 			}
 
 			for (i=0; i < kb_events_read; i++) {
-				long this_interval = ev[i].time.tv_sec & INTERVAL_MASK;
+				long this_interval = ev[i].time.tv_sec & REPORTING_INTERVAL_MASK;
 				if (debug) printf ("%ld %ld.%ld sz=%d kbd_events_read=%d\n"
 					, this_interval
 					, ev[i].time.tv_sec
@@ -278,7 +280,7 @@ int main (int argc, char *argv[]) {
 			for (i=0; i < mouse_events_read; i++) {
 				struct timeval tv;
 				gettimeofday(&tv, NULL);
-				long this_interval = tv.tv_sec & INTERVAL_MASK;
+				long this_interval = tv.tv_sec & REPORTING_INTERVAL_MASK;
 				if (debug) printf ("%ld %ld.%ld mouse_events_read=%d\n"
 					, this_interval
 					, tv.tv_sec
