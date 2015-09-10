@@ -1,0 +1,52 @@
+#!/bin/bash
+#
+# shpion   mqtt daemon
+# chkconfig: 2345 99 24
+#
+# csl04r 10 Sep 2015
+#
+# Source function library.
+. /etc/rc.d/init.d/functions
+
+export PATH=/usr/local/sbin:$PATH
+export LD_LIBRARY_PATH=/usr/local/lib:$LD_LIBRARY_PATH
+prog=shpion
+
+[ -f /etc/sysconfig/$prog ] && {
+ . /etc/sysconfig/$prog
+}
+PID_FILE=/var/run/$prog.pid
+
+bgstart() {
+        $prog $MQTT > /dev/null 2>&1 &
+        echo $! > $PID_FILE
+        return 0
+}
+
+# See how we were called.
+case "$1" in
+  start)
+        echo -n $"Starting $prog: "
+        bgstart && success || failure
+        echo
+       ;;
+  stop)
+        echo -n $"Stopping $prog: "
+        killproc -p $PID_FILE $prog
+        RETVAL=$?
+        [ $RETVAL -eq 0 ] && rm -f $PID_FILE
+        echo
+        ;;
+  restart|reload)
+	$0 stop
+	$0 start
+        ;;
+  status)
+        ps auxww | grep $prog | grep -v grep
+        ;;
+  *)
+        echo $"Usage: $0 {start|stop|restart|reload|status}"
+        exit 1
+esac
+
+exit 0
