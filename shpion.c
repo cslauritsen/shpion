@@ -193,7 +193,7 @@ int main (int argc, char *argv[]) {
 	char *email = gitemail();
 	char *emailHash = sha1_to_str((unsigned char*) email, strlen(email));
 	char *topicStr = NULL;
-	asprintf(&topicStr, "shpion/%s", emailHash);
+	asprintf(&topicStr, "shpion/vmact/%s", emailHash);
 	printf("publishing to %s\n", topicStr);
 
 

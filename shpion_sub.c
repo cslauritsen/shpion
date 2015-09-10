@@ -71,8 +71,7 @@ void usage()
 }
 
 
-void myconnect(MQTTClient* client, MQTTClient_connectOptions* opts)
-{
+void myconnect(MQTTClient* client, MQTTClient_connectOptions* opts) {
 	int rc = 0;
 	if ((rc = MQTTClient_connect(*client, opts)) != 0)
 	{
@@ -92,23 +91,22 @@ void cfinish(int sig)
 struct opts_struct
 {
 	char* clientid;
-  int nodelimiter;
+	int nodelimiter;
 	char* delimiter;
 	int qos;
 	char* username;
 	char* password;
 	char* host;
 	char* port;
-  int showtopics;
+	int showtopics;
 } opts =
 {
-	"stdout-subscriber", 0, "\n", 2, NULL, NULL, "localhost", "1883", 0
+	"shpion_sub", 0, "\n", 2, NULL, NULL, "localhost", "1883", 0
 };
 
 void getopts(int argc, char** argv);
 
-int main(int argc, char** argv)
-{
+int main(int argc, char** argv) {
 	MQTTClient client;
 	MQTTClient_connectOptions conn_opts = MQTTClient_connectOptions_initializer;
 	char* topic = NULL;
@@ -120,8 +118,9 @@ int main(int argc, char** argv)
 	
 	topic = argv[1];
 
-  if (strchr(topic, '#') || strchr(topic, '+'))
+	if (strchr(topic, '#') || strchr(topic, '+')) {
 		opts.showtopics = 1;
+	}
 
 	getopts(argc, argv);	
 	sprintf(url, "%s:%s", opts.host, opts.port);
@@ -141,38 +140,39 @@ int main(int argc, char** argv)
 	
 	rc = MQTTClient_subscribe(client, topic, opts.qos);
 
-	while (!toStop)
-	{
+	while (!toStop) {
 		char* topicName = NULL;
 		int topicLen;
 		MQTTClient_message* message = NULL;
 		
 		rc = MQTTClient_receive(client, &topicName, &topicLen, &message, 1000);
-		if (message)
-		{
-			if (opts.showtopics)
+		if (message) {
+			if (opts.showtopics) {
 				printf("%s,", topicName);
-      if (opts.nodelimiter)
+			}
+			if (opts.nodelimiter) {
 				printf("%.*s,", message->payloadlen, (char*)message->payload);
-			else
+			}
+			else {
 				printf("%.*s%s", message->payloadlen, (char*)message->payload, opts.delimiter);
+			}
 			fflush(stdout);
 			MQTTClient_freeMessage(&message);
 			MQTTClient_free(topicName);
 		}
-		if (rc != 0)
+		if (rc != 0) {
 			myconnect(&client, &conn_opts);
+		}
 	}
 	
 	printf("Stopping\n");
 	MQTTClient_disconnect(client, 0);
- 	MQTTClient_destroy(&client);
+	MQTTClient_destroy(&client);
 
 	return 0;
 }
 
-void getopts(int argc, char** argv)
-{
+void getopts(int argc, char** argv) {
 	int count = 2;
 	
 	while (count < argc)
