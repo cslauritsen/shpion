@@ -23,6 +23,7 @@
 #define REPORTING_INTERVAL_MASK		((unsigned long) 0xffffffffffffff80L)
 #define REPORTING_INTERVAL_SECONDS 	(1 + ~(REPORTING_INTERVAL_MASK))
 #define EVBUFSZ				64
+#define SHA1SUMLEN 20
 
 #define QOS         1
 #define TIMEOUT     10000L
@@ -30,6 +31,8 @@
 
 static volatile int exit_request = 0;
 
+static char *email = NULL;
+static char emailHash[2 * SHA1SUMLEN + 1];
 
 static MQTTClient client;
 MQTTClient_connectOptions conn_opts = MQTTClient_connectOptions_initializer;
@@ -56,13 +59,11 @@ static char * gitemail() {
 	return NULL;
 }
 
-static char * sha1_to_str(unsigned char* inbuf, int inlen) {
-	char *outbuf = NULL;
+static char * sha1_to_str(char* outbuf, unsigned char* inbuf, int inlen) {
 	unsigned char hash[20];
 	int j=0;
 	int k=0;
 	SHA1(inbuf, inlen, hash);
-	outbuf = (char*) malloc(sizeof(hash)*2 + 1); // holds hex representation of bytes
 	memset(outbuf, 0, sizeof(hash)*2 + 1);
 	for (j=0; j < sizeof(hash); j++) {
 		sprintf(outbuf+k, "%02x", hash[j]);
@@ -71,12 +72,51 @@ static char * sha1_to_str(unsigned char* inbuf, int inlen) {
 	return outbuf;
 }
 
-static void handler (int sig)
-{
-  MQTTClient_disconnect(client, 2);
-  MQTTClient_destroy(&client);
-  exit_request=1;
-  printf ("\nexiting...(%d)\n", sig);
+static void reportactivity(const char* topicStr, long this_interval) {
+	if (!exit_request) {
+		if (MQTTClient_isConnected(client) || (MQTTClient_connect(client, &conn_opts)) == MQTTCLIENT_SUCCESS) {
+    			MQTTClient_deliveryToken token;
+    			MQTTClient_message pubmsg = MQTTClient_message_initializer;
+			char * msgBuf = NULL;
+			asprintf(&msgBuf, "%ld,%d", this_interval, event_count);
+			if (msgBuf) {
+				pubmsg.payload 		= msgBuf;
+				pubmsg.payloadlen 	= strlen(msgBuf);
+				pubmsg.qos 		= QOS;
+				pubmsg.retained 	= 0;
+				MQTTClient_publishMessage(client, (const char*) topicStr, &pubmsg, &token);
+				free(msgBuf);
+			}
+	
+			if (debug) {
+				printf("put msg event count: %d\n", event_count);
+			}
+			event_count = 0;
+		}
+		else {
+			printf("WARNING: Connection failed to MQTT\n");
+		}
+	}
+}
+
+static void handler (int sig) {
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    long this_interval = tv.tv_sec & REPORTING_INTERVAL_MASK;
+    event_count = -1;
+    char *t = NULL;
+    asprintf(&t, "shpion/vmstop/%s", emailHash);
+    reportactivity(t, this_interval);
+    free(t);
+    MQTTClient_disconnect(client, 2);
+    MQTTClient_destroy(&client);
+
+	if (email) {
+		free(email);
+		email = NULL;
+	}
+    exit_request=1;
+    printf ("\nexiting...(%d)\n", sig);
 }
  
 volatile MQTTClient_deliveryToken deliveredtoken;
@@ -110,32 +150,6 @@ void connlost(void *context, char *cause) {
     printf("     cause: %s\n", cause);
 }
 
-static void reportactivity(const char* topicStr, long this_interval) {
-	if (!exit_request) {
-		if (MQTTClient_isConnected(client) || (MQTTClient_connect(client, &conn_opts)) == MQTTCLIENT_SUCCESS) {
-    			MQTTClient_deliveryToken token;
-    			MQTTClient_message pubmsg = MQTTClient_message_initializer;
-			char * msgBuf = NULL;
-			asprintf(&msgBuf, "%ld,%d", this_interval, event_count);
-			if (msgBuf) {
-				pubmsg.payload 		= msgBuf;
-				pubmsg.payloadlen 	= strlen(msgBuf);
-				pubmsg.qos 		= QOS;
-				pubmsg.retained 	= 0;
-				MQTTClient_publishMessage(client, (const char*) topicStr, &pubmsg, &token);
-				free(msgBuf);
-			}
-	
-			if (debug) {
-				printf("put msg event count: %d\n", event_count);
-			}
-			event_count = 0;
-		}
-		else {
-			printf("WARNING: Connection failed to MQTT\n");
-		}
-	}
-}
  
 int main (int argc, char *argv[]) {
 	struct input_event ev[EVBUFSZ];
@@ -145,6 +159,8 @@ int main (int argc, char *argv[]) {
 	sigset_t mysigs;
 	struct sigaction act;
 	struct timespec ts = {REPORTING_INTERVAL_SECONDS , 0}; // report every x seconds (where x matches the reporting mask)
+
+	memset(emailHash, 0, sizeof(emailHash));
 
 	memset(&act, 0, sizeof(act));
 	act.sa_handler = handler;
@@ -190,14 +206,13 @@ int main (int argc, char *argv[]) {
  
     	int rc;
 
-	char *email = gitemail();
-	char *emailHash = sha1_to_str((unsigned char*) email, strlen(email));
+	email = gitemail();
+    sha1_to_str(emailHash, (unsigned char*) email, strlen(email));
 	char *topicStr = NULL;
 	asprintf(&topicStr, "shpion/vmact/%s", emailHash);
 	printf("publishing to %s\n", topicStr);
 
-
-    	MQTTClient_create(&client, address, (const char*) email, MQTTCLIENT_PERSISTENCE_NONE, NULL);
+    MQTTClient_create(&client, address, (const char*) email, MQTTCLIENT_PERSISTENCE_NONE, NULL);
 	MQTTClient_setCallbacks(client, NULL, connlost, msgarrvd, delivered);
 
 	conn_opts.keepAliveInterval = 20; 
@@ -211,7 +226,10 @@ int main (int argc, char *argv[]) {
 		gettimeofday(&tv, NULL);
 		long this_interval = tv.tv_sec & REPORTING_INTERVAL_MASK;
 		event_count = -1;
-		reportactivity(topicStr, this_interval);
+		char *t = NULL;
+		asprintf(&t, "shpion/vmstart/%s", emailHash);
+		reportactivity(t, this_interval);
+		free(t);
 	}
 
 	struct pollfd pfds[2];
@@ -282,15 +300,6 @@ int main (int argc, char *argv[]) {
 		}
 	}
 
-	if (email) {
-		free(email);
-		email = NULL;
-	}
-
-	if (emailHash) {
-		free(emailHash);
-		emailHash = NULL;
-	}
 
 	if (topicStr) {
 		free(topicStr);
@@ -300,5 +309,3 @@ int main (int argc, char *argv[]) {
 	puts("Finished.");
 	return 0;
 }
-
-
