@@ -10,18 +10,18 @@ using uPLibrary.Networking.M2Mqtt.Utility;
 using uPLibrary.Networking.M2Mqtt.Internal;
 using uPLibrary.Networking.M2Mqtt;
 
-public class SWService : ServiceBase {
+public class shp_service : ServiceBase {
 	private MqttClient client;
 	private string server;
 
 	public static void Main(string[] args) {
-		 ServiceBase.Run(new SWService());
+		 ServiceBase.Run(new shp_service());
 	}
 
-	public SWService() {
+	public shp_service() {
 		CanPauseAndContinue = true;
         	CanHandleSessionChangeEvent = true;
-        	ServiceName = "SWService";
+        	ServiceName = "shp_service";
 	}
 
 	protected override void OnStart(string[] args) {
@@ -57,7 +57,7 @@ public class SWService : ServiceBase {
 	}
 
 	protected override void OnSessionChange(SessionChangeDescription changeDescription) {
-		EventLog.WriteEntry("SWService.OnSessionChange", DateTime.Now.ToLongTimeString() +
+		EventLog.WriteEntry("shp_service.OnSessionChange", DateTime.Now.ToLongTimeString() +
 			" - Session change notice received: " +
 			changeDescription.Reason.ToString() + "  Session ID: " + 
 			changeDescription.SessionId.ToString());
@@ -65,22 +65,22 @@ public class SWService : ServiceBase {
 
 		switch (changeDescription.Reason) {
 			case SessionChangeReason.SessionLock:
-				EventLog.WriteEntry("SWService.OnSessionChange: Lock");
+				EventLog.WriteEntry("shp_service.OnSessionChange: Lock");
 				Report(changeDescription.Reason.ToString());
 				break;
 
 			case SessionChangeReason.SessionUnlock:
-				EventLog.WriteEntry("SWService.OnSessionChange: Unlock");
+				EventLog.WriteEntry("shp_service.OnSessionChange: Unlock");
 				Report(changeDescription.Reason.ToString());
 				break;
 
 			case SessionChangeReason.SessionLogon:
-				EventLog.WriteEntry("SWService.OnSessionChange: Logon");
+				EventLog.WriteEntry("shp_service.OnSessionChange: Logon");
 				Report(changeDescription.Reason.ToString());
 				break;
 
 			case SessionChangeReason.SessionLogoff:       
-				EventLog.WriteEntry("SWService.OnSessionChange Logoff"); 
+				EventLog.WriteEntry("shp_service.OnSessionChange Logoff"); 
 				Report(changeDescription.Reason.ToString());
 				break;
 			default:

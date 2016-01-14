@@ -23,5 +23,6 @@ link_libraries(ssl paho-mqtt3c expat glib-2.0)
 
 add_executable(shpion src/shpion.c)
 add_executable(shpion_sub src/shpion_sub.c)
+add_executable(shp_service dotnet/shp_service.cs)
 
 install(TARGETS shpion shpion_sub DESTINATION /usr/local/bin)
