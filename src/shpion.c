@@ -152,8 +152,8 @@ void connlost(void *context, char *cause) {
 
  
 int main (int argc, char *argv[]) {
-	struct input_event ev[EVBUFSZ];
-	int mfd, kfd, bytes_read, size = sizeof (struct input_event);
+	struct input_event input_events[EVBUFSZ];
+	int mfd, kfd, bytes_read;
 	long last_interval = -1;
 
 	sigset_t mysigs;
@@ -232,7 +232,8 @@ int main (int argc, char *argv[]) {
 		free(t);
 	}
 
-	struct pollfd pfds[2];
+	#define POLL_FD_COUNT 2
+	struct pollfd pfds[POLL_FD_COUNT];
 	unsigned char buf[3*10];
 	while (!exit_request) {
 
@@ -242,17 +243,16 @@ int main (int argc, char *argv[]) {
 		pfds[1].fd = mfd;
 		pfds[1].events = POLLIN;
 
-		int err = ppoll(pfds, 2, &ts, &mysigs);
+		int err = ppoll(pfds, POLL_FD_COUNT, &ts, &mysigs);
 
 		if(EINTR != err) {
-			int i=0;
 			bytes_read = 0;
 			int kb_events_read = 0;
 			int mouse_events_read = 0;
 			// Keyboard events fill in struct input_event
 			if (pfds[0].revents & POLLIN) {
-				bytes_read += read(pfds[0].fd, ev + kb_events_read, size * (EVBUFSZ-kb_events_read));
-				kb_events_read += bytes_read / size;
+				bytes_read += read(pfds[0].fd, input_events + kb_events_read, sizeof(struct input_event) * (EVBUFSZ-kb_events_read));
+				kb_events_read += bytes_read / sizeof(struct input_event);
 				event_count += kb_events_read;
 			}
 
@@ -270,20 +270,21 @@ int main (int argc, char *argv[]) {
 				reportactivity(topicStr, this_interval);
 			}
 
-			for (i=0; i < kb_events_read; i++) {
-				long this_interval = ev[i].time.tv_sec & REPORTING_INTERVAL_MASK;
-				if (debug) printf ("%ld %ld.%ld sz=%d kbd_events_read=%d\n"
+			for (int i=0; i < kb_events_read; i++) {
+				long this_interval = input_events[i].time.tv_sec & REPORTING_INTERVAL_MASK;
+				if (debug) printf ("%ld %ld.%ld sz=%ld kbd_events_read=%d\n"
 					, this_interval
-					, ev[i].time.tv_sec
-					, ev[i].time.tv_usec
-					, size, kb_events_read
+					, input_events[i].time.tv_sec
+					, input_events[i].time.tv_usec
+					, sizeof(struct input_event)
+					, kb_events_read
 					);
 				if (this_interval != last_interval) {
 					reportactivity(topicStr, this_interval);
 				}
 				last_interval = this_interval;
 			}
-			for (i=0; i < mouse_events_read; i++) {
+			for (int i=0; i < mouse_events_read; i++) {
 				struct timeval tv;
 				gettimeofday(&tv, NULL);
 				long this_interval = tv.tv_sec & REPORTING_INTERVAL_MASK;
