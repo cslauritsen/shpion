@@ -3,7 +3,7 @@ shpion
 
 Introduction
 -----------
-shpion is a little program that counts keyboard and mouse input events and publishes them anonymously to a mqtt broker.
+shpion is a little program that publishes counts of keyboard and mouse input events anonymously to a mqtt broker. shpion only works on linux. 
 
 INSTALLATION
 ------------
