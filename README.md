@@ -8,7 +8,7 @@ shpion is a little program that counts keyboard and mouse input events and publi
 INSTALLATION
 ------------
 
-This program requires cmake, lib-paho3c, & ssl to build. It installs the compiled binaries to /usr/local/bin.
+This program requires cmake, the paho-mqtt3c library, & the open ssl library to build. It installs the compiled binaries to /usr/local/bin.
 
 Build Procedure:
 ```
